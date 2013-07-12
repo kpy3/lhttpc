@@ -24,6 +24,12 @@
 %%% ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 %%% ----------------------------------------------------------------------------
 
+-define(PARSE_URL_RE, 
+    "^(?<SCHEME>https?)://((?<USER>[^:@]+):?(?<PASSWORD>[^@]*)@)?"
+    "(?<HOST>[^:/?]+)(:(?<PORT>[0-9]+))?/?(?<PATH>.*)$").
+-define(PARSE_URL_RE_OPTIONS, 
+    [{capture, ['SCHEME','USER','PASSWORD','HOST','PORT','PATH'], list}]).
+
 -record(lhttpc_url, {
     host :: string(),
     port :: integer(),

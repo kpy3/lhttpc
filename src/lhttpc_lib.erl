@@ -120,19 +120,18 @@ maybe_atom_to_list(List) ->
 %%------------------------------------------------------------------------------
 -spec parse_url(string()) -> #lhttpc_url{}.
 parse_url(URL) ->
-    % XXX This should be possible to do with the re module?
-    {Scheme, CredsHostPortPath} = split_scheme(URL),
-    {User, Passwd, HostPortPath} = split_credentials(CredsHostPortPath),
-    {Host, PortPath} = split_host(HostPortPath, []),
-    {Port, Path} = split_port(Scheme, PortPath, []),
-    #lhttpc_url{
-        host = string:to_lower(Host),
-        port = Port,
-        path = Path,
-        user = User,
-        password = Passwd,
-        is_ssl = (Scheme =:= https)
-    }.
+    case re:run(URL, ?PARSE_URL_RE, ?PARSE_URL_RE_OPTIONS) of
+        {match,[Scheme, User, Password, Host, Port, Path]} ->
+            #lhttpc_url{
+                host = ensure_host(Host),
+                port = ensure_port(Scheme, Port),
+                path = ensure_path(Path),
+                user = ensure_user(User),
+                password = ensure_password(Password),
+                is_ssl = (Scheme =:= "https")
+            };
+        nomatch -> exit(badarg)
+    end.
 
 %%------------------------------------------------------------------------------
 %% @spec (Path, Method, Headers, Host, Port, Body, PartialUpload) -> Request
@@ -196,93 +195,50 @@ format_hdrs(Headers) ->
 %% Internal functions
 %%==============================================================================
 
-%%------------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%%------------------------------------------------------------------------------
-split_scheme("http://" ++ HostPortPath) ->
-    {http, HostPortPath};
-split_scheme("https://" ++ HostPortPath) ->
-    {https, HostPortPath}.
+ensure_host("@"++Host) ->
+    ensure_host(Host);
+ensure_host(Host) ->
+    string:to_lower(Host).
 
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc
 %% @end
 %%------------------------------------------------------------------------------
-split_credentials(CredsHostPortPath) ->
-    case string:tokens(CredsHostPortPath, "@") of
-        [HostPortPath] ->
-            {"", "", HostPortPath};
-        [Creds, HostPortPath] ->
-            % RFC1738 (section 3.1) says:
-            % "The user name (and password), if present, are followed by a
-            % commercial at-sign "@". Within the user and password field, any ":",
-            % "@", or "/" must be encoded."
-            % The mentioned encoding is the "percent" encoding.
-            case string:tokens(Creds, ":") of
-                [User] ->
-                    % RFC1738 says ":password" is optional
-                    {http_uri:decode(User), "", HostPortPath};
-                [User, Passwd] ->
-                    {http_uri:decode(User), http_uri:decode(Passwd), HostPortPath}
-            end
-    end.
+ensure_port("http", []) -> 
+    80;
+ensure_port("https", []) ->
+    443;
+ensure_port(_, Port) ->
+    list_to_integer(Port).
 
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc
 %% @end
 %%------------------------------------------------------------------------------
--spec split_host(string(), string()) -> {string(), string()}.
-split_host("[" ++ Rest, []) ->
-    % IPv6 address literals are enclosed by square brackets (RFC2732)
-    case string:str(Rest, "]") of
-        0 ->
-            split_host(Rest, "[");
-        N ->
-            {IPv6Address, "]" ++ PortPath0} = lists:split(N - 1, Rest),
-            case PortPath0 of
-                ":" ++ PortPath ->
-                    {IPv6Address, PortPath};
-                _ ->
-                    {IPv6Address, PortPath0}
-            end
-    end;
-split_host([$: | PortPath], Host) ->
-    {lists:reverse(Host), PortPath};
-split_host([$/ | _] = PortPath, Host) ->
-    {lists:reverse(Host), PortPath};
-split_host([$? | _] = Query, Host) ->
-    %% The query string follows the hostname, without a slash.  The
-    %% path is empty, but for HTTP an empty path is equivalent to "/"
-    %% (RFC 3986, section 6.2.3), so let's add the slash ourselves.
-    {lists:reverse(Host), "/" ++ Query};
-split_host([H | T], Host) ->
-    split_host(T, [H | Host]);
-split_host([], Host) ->
-    {lists:reverse(Host), []}.
+ensure_user([]) ->
+    "";
+ensure_user(User) ->
+    http_uri:decode(User).
 
 %%------------------------------------------------------------------------------
 %% @private
 %% @doc
 %% @end
 %%------------------------------------------------------------------------------
-split_port(http, [$/ | _] = Path, []) ->
-    {80, Path};
-split_port(https, [$/ | _] = Path, []) ->
-    {443, Path};
-split_port(http, [], []) ->
-    {80, "/"};
-split_port(https, [], []) ->
-    {443, "/"};
-split_port(_, [], Port) ->
-    {list_to_integer(lists:reverse(Port)), "/"};
-split_port(_,[$/ | _] = Path, Port) ->
-    {list_to_integer(lists:reverse(Port)), Path};
-split_port(Scheme, [P | T], Port) ->
-    split_port(Scheme, T, [P | Port]).
+ensure_password([]) ->
+    "";
+ensure_password(Password) ->
+    http_uri:decode(Password).
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%%------------------------------------------------------------------------------
+ensure_path(Path) ->
+    "/" ++ Path.
 
 %%------------------------------------------------------------------------------
 %% @private
